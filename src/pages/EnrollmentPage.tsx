@@ -2,7 +2,7 @@ import { useRef, useState, useEffect } from 'react';
 import * as faceapi from '@vladmandic/face-api';
 import { faceDb } from '../lib/db';
 import type { EnrolledUser } from '../lib/db';
-import { Camera, Save, ArrowLeft, Info, PlusCircle, List } from 'lucide-react';
+import { Camera, Save, ArrowLeft, Info, PlusCircle, List, UserPlus, FileEdit, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const captureHints = [
@@ -20,7 +20,11 @@ export default function EnrollmentPage() {
   
   // Available groups for dropdown
   const [availableGroups, setAvailableGroups] = useState<string[]>([]);
+  const [allUsers, setAllUsers] = useState<EnrolledUser[]>([]);
+  
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   
   // Group Selection
   const [selectedGroup, setSelectedGroup] = useState('');
@@ -38,22 +42,27 @@ export default function EnrollmentPage() {
   
   const [descriptors, setDescriptors] = useState<Float32Array[]>([]);
 
-  // Load groups on mount
-  useEffect(() => {
-    async function loadGroups() {
-      const groups = new Set<string>();
-      await faceDb.iterate((user: EnrolledUser) => {
-        groups.add(user.groupId);
-      });
-      const groupList = Array.from(groups);
-      setAvailableGroups(groupList);
-      if (groupList.length > 0) {
-        setSelectedGroup(groupList[0]);
-      } else {
-        setIsCreatingNew(true);
-      }
+  // Load data on mount
+  const refreshData = async () => {
+    const groups = new Set<string>();
+    const users: EnrolledUser[] = [];
+    await faceDb.iterate((user: EnrolledUser) => {
+      groups.add(user.groupId);
+      users.push(user);
+    });
+    const groupList = Array.from(groups);
+    setAvailableGroups(groupList);
+    setAllUsers(users);
+    
+    if (groupList.length > 0 && !selectedGroup) {
+      setSelectedGroup(groupList[0]);
+    } else if (groupList.length === 0) {
+      setIsCreatingNew(true);
     }
-    loadGroups();
+  };
+
+  useEffect(() => {
+    refreshData();
   }, []);
 
   useEffect(() => {
@@ -124,6 +133,19 @@ export default function EnrollmentPage() {
     }
   };
 
+  const handleEditUserSelect = (id: string) => {
+    const user = allUsers.find(u => u.id === id);
+    if (user) {
+      setName(user.name);
+      setSelectedGroup(user.groupId);
+      setEditingUserId(user.id);
+      setIsEditMode(true);
+      setIsCreatingNew(false);
+      setDescriptors([]); // Allow fresh capture for update
+      setMessage(`Loaded ${user.name} for editing.`);
+    }
+  };
+
   const handleFinalSubmit = async () => {
     const finalGroupName = isCreatingNew ? newGroupName.trim() : selectedGroup;
     
@@ -137,7 +159,7 @@ export default function EnrollmentPage() {
        return;
     }
 
-    const id = crypto.randomUUID();
+    const id = isEditMode && editingUserId ? editingUserId : crypto.randomUUID();
     
     const user: EnrolledUser = {
       id,
@@ -150,22 +172,31 @@ export default function EnrollmentPage() {
     setLoading(true);
     try {
       await faceDb.setItem(id, user);
-      setMessage(`Successfully enrolled: ${user.name} into ${finalGroupName}`);
+      setMessage(`Successfully ${isEditMode ? 'updated' : 'enrolled'}: ${user.name}`);
       
-      // refresh groups if new was added
-      if (isCreatingNew && !availableGroups.includes(finalGroupName)) {
-        setAvailableGroups(prev => [...prev, finalGroupName]);
-      }
+      await refreshData();
       
-      // reset for next user
-      setName('');
-      setDescriptors([]);
-      setTimeout(() => setMessage(''), 3000);
+      // Reset after 2s
+      setTimeout(() => {
+        if (!isEditMode) {
+          setName('');
+          setDescriptors([]);
+        }
+        setMessage('');
+      }, 2000);
     } catch(err) {
       setMessage('Database error saving records.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const resetMode = () => {
+    setIsEditMode(false);
+    setEditingUserId(null);
+    setName('');
+    setDescriptors([]);
+    setMessage('');
   };
 
   return (
@@ -174,10 +205,10 @@ export default function EnrollmentPage() {
         <button className="btn btn-ghost" onClick={() => navigate(-1)}>
           <ArrowLeft className="w-6 h-6"/> Back
         </button>
-        <div className="mx-auto font-bold text-lg hidden sm:block">Student Enrollment</div>
+        <div className="mx-auto font-bold text-lg hidden sm:block">Student Management</div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 lg:p-8">
+      <div className="flex-1 overflow-y-auto p-4 lg:p-8 text-base-content">
         <div className="max-w-4xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
           
           {/* Camera View */}
@@ -214,15 +245,15 @@ export default function EnrollmentPage() {
                <div className="card-body p-4 text-center">
                  {descriptors.length < 4 ? (
                    <>
-                     <h3 className="font-bold text-lg text-base-content">{captureHints[descriptors.length]}</h3>
-                     <p className="text-sm text-base-content/60">Capture varied angles for better accuracy</p>
+                     <h3 className="font-bold text-lg">{captureHints[descriptors.length]}</h3>
+                     <p className="text-sm text-base-content/60">Capture faces to {isEditMode ? 'update' : 'create'} biometric data</p>
                      <button 
                        className={`btn btn-primary mt-2 flex items-center gap-2 ${loading ? 'loading' : ''}`}
                        onClick={handleCaptureStep}
                        disabled={loading || !stream}
                      >
                        <Camera className="w-5 h-5"/>
-                       Capture Face Angle {descriptors.length + 1}
+                       Capture Step {descriptors.length + 1}
                      </button>
                    </>
                  ) : (
@@ -237,84 +268,131 @@ export default function EnrollmentPage() {
 
           {/* Form */}
           <div className="space-y-6">
-            <div className="card bg-base-100 shadow-xl border border-base-300">
-              <div className="card-body">
-                <h2 className="card-title text-2xl font-black border-b border-base-200 pb-4 mb-4 text-base-content">Student Info</h2>
-                
-                <div className="form-control mb-4 text-base-content">
-                  <label className="label"><span className="label-text font-bold text-lg">Full Name</span></label>
-                  <input type="text" className="input input-lg input-bordered w-full bg-base-200/50 focus:bg-base-100" 
-                    value={name} onChange={(e) => setName(e.target.value)} placeholder="John Doe" />
-                </div>
+            <div className="card bg-base-100 shadow-xl border border-base-300 overflow-hidden">
+              <div className="flex p-0 bg-base-200">
+                <button 
+                  onClick={resetMode}
+                  className={`flex-1 py-4 font-bold flex items-center justify-center gap-2 transition-colors ${!isEditMode ? 'bg-base-100 text-primary' : 'hover:bg-base-300 text-base-content/60'}`}
+                >
+                  <UserPlus className="w-5 h-5"/> Enroll New
+                </button>
+                <button 
+                  onClick={() => setIsEditMode(true)}
+                  className={`flex-1 py-4 font-bold flex items-center justify-center gap-2 transition-colors ${isEditMode ? 'bg-base-100 text-secondary' : 'hover:bg-base-300 text-base-content/60'}`}
+                >
+                  <FileEdit className="w-5 h-5"/> Update Existing
+                </button>
+              </div>
 
-                <div className="p-6 rounded-2xl border bg-base-300 shadow-inner border-base-300 space-y-4">
+              <div className="card-body">
+                {isEditMode ? (
+                  <div className="form-control mb-4">
+                    <label className="label"><span className="label-text font-bold">Select Student</span></label>
+                    <select 
+                      className="select select-bordered w-full bg-base-200"
+                      onChange={(e) => handleEditUserSelect(e.target.value)}
+                      value={editingUserId || ''}
+                    >
+                      <option value="" disabled>--- Choose Student to Update ---</option>
+                      {allUsers.map(u => (
+                        <option key={u.id} value={u.id}>{u.name} ({u.groupId})</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="form-control mb-4">
+                    <label className="label"><span className="label-text font-bold">Student Name</span></label>
+                    <input 
+                      type="text" 
+                      className="input input-bordered w-full" 
+                      value={name} 
+                      onChange={(e) => setName(e.target.value)} 
+                      placeholder="Enter full name" 
+                    />
+                  </div>
+                )}
+
+                <div className="p-5 rounded-2xl border bg-base-200/50 border-base-300 space-y-4">
                   <div className="flex justify-between items-center mb-2">
                     <div className="flex items-center gap-2 text-secondary">
-                      <Info className="w-4 h-4"/>
-                      <h3 className="font-bold text-sm uppercase tracking-widest text-secondary">Group Detail</h3>
+                      <List className="w-4 h-4"/>
+                      <h3 className="font-bold text-xs uppercase tracking-widest text-secondary">Class / Group</h3>
                     </div>
-                    {availableGroups.length > 0 && (
+                    {!isEditMode && availableGroups.length > 0 && (
                       <button 
-                        className="btn btn-xs btn-ghost gap-1 text-primary-focus"
+                        className="btn btn-xs btn-ghost gap-1 text-primary"
                         onClick={() => setIsCreatingNew(!isCreatingNew)}
                       >
-                        {isCreatingNew ? <><List className="w-3 h-3"/> Use Existing</> : <><PlusCircle className="w-3 h-3"/> New Group</>}
+                        {isCreatingNew ? <><List className="w-3 h-3"/> Use List</> : <><PlusCircle className="w-3 h-3"/> Create New</>}
                       </button>
                     )}
                   </div>
                   
                   {isCreatingNew ? (
                     <div className="form-control">
-                      <label className="label">
-                        <span className="label-text font-semibold text-base-content">Create New Group Code</span>
-                      </label>
                       <input 
                         type="text" 
-                        className="input input-bordered w-full bg-base-100 shadow-sm border-2 border-primary/20" 
+                        className="input input-sm input-bordered w-full" 
                         value={newGroupName} 
                         onChange={(e) => setNewGroupName(e.target.value)} 
-                        placeholder="INST_CLASS_25/26" 
+                        placeholder="Rabbani_10A_25/26" 
                       />
-                      <label className="label">
-                        <span className="label-text-alt text-base-content/60 italic">Format: Institution_Level_Period</span>
-                      </label>
                     </div>
                   ) : (
                     <div className="form-control">
-                      <label className="label">
-                        <span className="label-text font-semibold text-base-content">Select Existing Group</span>
-                      </label>
                       <select 
-                        className="select select-bordered w-full bg-base-100 shadow-md border-2 border-base-content/20 font-bold"
+                        className="select select-sm select-bordered w-full"
+                        disabled={isEditMode}
                         value={selectedGroup}
                         onChange={(e) => setSelectedGroup(e.target.value)}
                       >
                         {availableGroups.map(g => (
-                          <option key={g} value={g} className="bg-base-100 text-base-content py-2">{g}</option>
+                          <option key={g} value={g}>{g}</option>
                         ))}
                       </select>
                     </div>
                   )}
-
-                  <div className="badge badge-neutral w-full p-4 justify-start font-mono text-xs opacity-70 truncate text-neutral-content">
-                    TARGET: {isCreatingNew ? newGroupName : selectedGroup}
-                  </div>
                 </div>
 
+                {isEditMode && editingUserId && (
+                  <div className="alert alert-info py-2 shadow-sm text-xs mt-4">
+                    <Info className="w-4 h-4"/>
+                    <span>Collecting new faces will overwrite previous biometric data for this user.</span>
+                  </div>
+                )}
+
                 {message && !message.includes('Scanning') && (
-                  <div className={`alert text-sm font-semibold shadow-sm mt-4 ${message.includes('Error') || message.includes('Please') || message.includes('denied') || message.includes('HTTPS') ? 'alert-error' : 'alert-success'}`}>
+                  <div className={`alert text-sm font-semibold shadow-sm mt-4 ${message.includes('Error') || message.includes('Please') ? 'alert-error' : 'alert-success'}`}>
                     <span>{message}</span>
                   </div>
                 )}
 
-                <button 
-                  className="btn btn-secondary w-full btn-lg mt-6 shadow-md"
-                  disabled={descriptors.length === 0 || loading || !name.trim() || (!isCreatingNew && !selectedGroup)}
-                  onClick={handleFinalSubmit}
-                >
-                  <Save className="w-5 h-5"/>
-                  Commit Registration
-                </button>
+                <div className="flex gap-2 mt-6">
+                   <button 
+                    className={`btn flex-1 ${isEditMode ? 'btn-secondary' : 'btn-primary shadow-lg'}`}
+                    disabled={descriptors.length === 0 || loading || !name.trim()}
+                    onClick={handleFinalSubmit}
+                  >
+                    <Save className="w-5 h-5"/>
+                    {isEditMode ? 'Update Face' : 'Enroll Student'}
+                  </button>
+                  
+                  {isEditMode && editingUserId && (
+                    <button 
+                      className="btn btn-error btn-square btn-outline"
+                      title="Delete Student"
+                      onClick={async () => {
+                        if(confirm(`Are you sure you want to delete ${name}?`)) {
+                          await faceDb.removeItem(editingUserId);
+                          resetMode();
+                          refreshData();
+                        }
+                      }}
+                    >
+                      <Trash2 className="w-5 h-5"/>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
