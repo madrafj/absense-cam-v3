@@ -188,7 +188,7 @@ export default function EnrollmentPage() {
                 muted 
                 playsInline 
                 ref={videoRef} 
-                className="absolute inset-0 w-full h-full object-cover transform -scale-x-100" 
+                className={`absolute inset-0 w-full h-full object-cover transform ${facingMode === 'user' ? '-scale-x-100' : ''}`} 
               />
               {!stream && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-base-300 gap-4 p-6 text-center">

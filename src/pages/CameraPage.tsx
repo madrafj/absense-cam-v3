@@ -134,8 +134,19 @@ export default function CameraPage() {
       if (faceMatcher) {
         const results = resizedDetections.map(d => faceMatcher!.findBestMatch(d.descriptor));
         results.forEach((result, i) => {
-          const box = resizedDetections[i].detection.box;
+          let box = resizedDetections[i].detection.box;
           
+          // Manually flip coordinates if the video is mirrored via CSS
+          // so the labels stay readable (non-mirrored) on the canvas
+          if (facingMode === 'user') {
+            box = new faceapi.Box({
+              x: displaySize.width - box.x - box.width,
+              y: box.y,
+              width: box.width,
+              height: box.height
+            });
+          }
+
           let color = result.label !== 'unknown' ? '#10b981' : '#ef4444';
           let text = result.label !== 'unknown' ? 'Recognized' : 'Unknown';
 
@@ -151,7 +162,19 @@ export default function CameraPage() {
           drawBox.draw(canvasRef.current!);
         });
       } else {
-         faceapi.draw.drawDetections(canvasRef.current, resizedDetections);
+         // Fallback for simple detection without matcher
+         resizedDetections.forEach(d => {
+            let box = d.detection.box;
+            if (facingMode === 'user') {
+                box = new faceapi.Box({
+                  x: displaySize.width - box.x - box.width,
+                  y: box.y,
+                  width: box.width,
+                  height: box.height
+                });
+            }
+            new faceapi.draw.DrawBox(box).draw(canvasRef.current!);
+         });
       }
     } catch(err) {
        console.error("Detection loop error", err);
@@ -280,11 +303,11 @@ export default function CameraPage() {
           muted 
           playsInline
           onPlay={handleVideoPlay}
-          className="absolute inset-0 w-full h-full object-cover transform -scale-x-100" 
+          className={`absolute inset-0 w-full h-full object-cover transform ${facingMode === 'user' ? '-scale-x-100' : ''}`}
         />
         <canvas 
           ref={canvasRef} 
-          className="absolute inset-0 w-full h-full object-cover transform -scale-x-100" 
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none" 
         />
 
         <div className="absolute top-4 right-4 z-50">
