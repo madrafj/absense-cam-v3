@@ -21,6 +21,7 @@ export default function CameraPage() {
   // Pre-session strict group selection
   const [availableGroups, setAvailableGroups] = useState<string[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
+  const [threshold, setThreshold] = useState(0.45);
   const [sessionStarted, setSessionStarted] = useState(false);
 
   // Load all unique groups on mount
@@ -52,7 +53,8 @@ export default function CameraPage() {
       });
       
       if (labeledDescriptors.length > 0) {
-        setFaceMatcher(new faceapi.FaceMatcher(labeledDescriptors, 0.45)); 
+        // Use the student-selected threshold (Sensitivity)
+        setFaceMatcher(new faceapi.FaceMatcher(labeledDescriptors, threshold)); 
       } else {
         setFaceMatcher(null);
       }
@@ -257,6 +259,34 @@ export default function CameraPage() {
                      <span className="label-text-alt text-error font-medium mt-1">No groups found. Enroll students first.</span>
                   </label>
                 )}
+              </div>
+
+              <div className="form-control w-full mb-8 bg-base-200 p-4 rounded-xl border border-base-300">
+                <label className="label py-0">
+                  <span className="label-text font-bold text-base-content">Matching Sensitivity</span>
+                  <span className={`label-text-alt font-mono font-bold ${threshold > 0.55 ? 'text-warning' : 'text-primary'}`}>
+                    {threshold.toFixed(2)}
+                  </span>
+                </label>
+                <input 
+                  type="range" 
+                  min="0.30" 
+                  max="0.80" 
+                  step="0.05" 
+                  value={threshold} 
+                  onChange={(e) => setThreshold(parseFloat(e.target.value))} 
+                  className="range range-xs range-primary mt-2" 
+                />
+                <div className="flex justify-between text-[10px] px-1 mt-1 opacity-50 font-bold uppercase tracking-tighter">
+                  <span>Strict</span>
+                  <span>Balanced</span>
+                  <span>Loose</span>
+                </div>
+                <div className="mt-3 text-[11px] leading-tight text-base-content/60 italic">
+                  {threshold <= 0.40 && "Best for high security, but harder to recognize."}
+                  {(threshold > 0.40 && threshold <= 0.55) && "Standard setting for most environments."}
+                  {threshold > 0.55 && "Best for scanning videos or screens (YouTube)."}
+                </div>
               </div>
 
               <button 
